@@ -1,10 +1,11 @@
 """Billing data processors."""
 
-import logging
+import contextlib
 from datetime import datetime, timedelta
+import logging
 from typing import Optional, TypedDict
-from jinja2 import Environment
 
+from jinja2 import Environment
 import voluptuous
 
 from ..definitions import (
@@ -20,7 +21,6 @@ from ..definitions import (
 )
 from ..processors import utils
 from ..processors.base import Processor
-import contextlib
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -46,7 +46,7 @@ class BillingProcessor(Processor):
     """A billing processor for edata."""
 
     def do_process(self):
-        """Main method for the BillingProcessor."""
+        """Process billing and get hourly/daily/monthly metrics."""
         self._output = BillingOutput(hourly=[], daily=[], monthly=[])
 
         _schema = voluptuous.Schema(
@@ -103,6 +103,9 @@ class BillingProcessor(Processor):
         surplus_expr = env.compile_expression(
             f'({self._input["rules"]["surplus_formula"]})|float|round(3)'
         )
+        main_expr = env.compile_expression(
+            f'({self._input["rules"]["main_formula"]})|float|round(3)'
+        )
 
         _data = sorted([_data[x] for x in _data], key=lambda x: x["datetime"])
         hourly = []
@@ -147,15 +150,6 @@ class BillingProcessor(Processor):
                 value_eur=0,
                 delta_h=1,
             )
-
-            new_item["value_eur"] = round(
-                new_item["energy_term"]
-                + new_item["power_term"]
-                + new_item["others_term"]
-                - new_item["surplus_term"],
-                3,
-            )
-
             hourly.append(new_item)
 
         self._output["hourly"] = hourly
@@ -186,8 +180,8 @@ class BillingProcessor(Processor):
                 self._output["daily"][-1]["power_term"] += hour["power_term"]
                 self._output["daily"][-1]["others_term"] += hour["others_term"]
                 self._output["daily"][-1]["surplus_term"] += hour["surplus_term"]
-                self._output["daily"][-1]["value_eur"] += hour["value_eur"]
                 self._output["daily"][-1]["delta_h"] += hour["delta_h"]
+                self._output["daily"][-1]["value_eur"] += hour["value_eur"]
 
             if last_month_dt is None or curr_month_dt != last_month_dt:
                 self._output["monthly"].append(
@@ -218,4 +212,4 @@ class BillingProcessor(Processor):
                 cost["power_term"] = round(cost["power_term"], 3)
                 cost["others_term"] = round(cost["others_term"], 3)
                 cost["surplus_term"] = round(cost["surplus_term"], 3)
-                cost["value_eur"] = round(cost["value_eur"], 3)
+                cost["value_eur"] = round(main_expr(**cost, **self._input["rules"]), 3)

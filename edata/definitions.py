@@ -2,8 +2,7 @@
 
 import voluptuous as vol
 import datetime as dt
-from collections.abc import Iterable
-from typing import TypedDict, _TypedDictMeta
+from typing import TypedDict
 
 ATTRIBUTES = {
     "cups": None,
@@ -56,12 +55,24 @@ ATTRIBUTES = {
     "max_power_90perc_kW": "kW",
 }
 
-
+# Energy term with taxes
 DEFAULT_BILLING_ENERGY_FORMULA = "electricity_tax * iva_tax * kwh_eur * kwh"
+
+# Power term with taxes
 DEFAULT_BILLING_POWER_FORMULA = "electricity_tax * iva_tax * (p1_kw * (p1_kw_year_eur + market_kw_year_eur) + p2_kw * p2_kw_year_eur) / 365 / 24"
+
+# Others term with taxes
 DEFAULT_BILLING_OTHERS_FORMULA = "iva_tax * meter_month_eur / 30 / 24"
+
+# Surplus term with taxes
 DEFAULT_BILLING_SURPLUS_FORMULA = (
-    "electricity_tax * iva_tax * [surplus_kwh, kwh]|min * surplus_kwh_eur"
+    "electricity_tax * iva_tax * surplus_kwh * surplus_kwh_eur"
+)
+
+# Sum energy and power terms, and substract surplus until 0.
+# An alternative would be "[(energy_term + power_term - surplus_term), 0]|max + others_term"
+DEFAULT_BILLING_MAIN_FORMULA = (
+    "[(energy_term - surplus_term), 0]|max + power_term + others_term"
 )
 
 
@@ -113,8 +124,8 @@ ContractSchema = vol.Schema(
         vol.Required("date_end"): dt.datetime,
         vol.Required("marketer"): str,
         vol.Required("distributorCode"): str,
-        vol.Required("power_p1"): vol.Union(float, None),
-        vol.Required("power_p2"): vol.Union(float, None),
+        vol.Required("power_p1"): vol.Union(vol.Coerce(float), None),
+        vol.Required("power_p2"): vol.Union(vol.Coerce(float), None),
     }
 )
 
@@ -218,6 +229,7 @@ PricingRulesSchema = vol.Schema(
         vol.Optional("power_formula", default=DEFAULT_BILLING_POWER_FORMULA): str,
         vol.Optional("others_formula", default=DEFAULT_BILLING_OTHERS_FORMULA): str,
         vol.Optional("surplus_formula", default=DEFAULT_BILLING_SURPLUS_FORMULA): str,
+        vol.Optional("main_formula", default=DEFAULT_BILLING_MAIN_FORMULA): str,
         vol.Optional("cycle_start_day", default=1): vol.Range(1, 30),
     }
 )
