@@ -58,6 +58,7 @@ class EdataHelper:
         self._date_from = datetime(1970, 1, 1)
         self._date_to = datetime.today()
         self._must_dump = True
+        self._incremental_update = True
 
         if data is not None:
             data = check_storage_integrity(data)
@@ -107,10 +108,12 @@ class EdataHelper:
         self,
         date_from: datetime = datetime(1970, 1, 1),
         date_to: datetime = datetime.today(),
+        incremental_update: bool = True,
     ):
         """Synchronous update."""
         self._date_from = date_from
         self._date_to = date_to
+        self._incremental_update = incremental_update
 
         # update datadis resources
         self.update_datadis(self._cups, date_from, date_to)
@@ -423,10 +426,12 @@ class EdataHelper:
     def process_consumptions(self):
         """Process consumptions data."""
         if len(self.data["consumptions"]) > 0:
-            try:
-                new_data_from = self.data["consumptions_monthly_sum"][-1]["datetime"]
-            except Exception:
-                new_data_from = self._date_from
+            new_data_from = self._date_from
+            if self._incremental_update:
+                with contextlib.suppress(Exception):
+                    new_data_from = self.data["consumptions_monthly_sum"][-1][
+                        "datetime"
+                    ]
 
             proc = ConsumptionProcessor(
                 {
@@ -624,10 +629,10 @@ class EdataHelper:
     def process_cost(self):
         """Process costs."""
         if self.enable_billing:
-            try:
-                new_data_from = self.data["cost_monthly_sum"][-1]["datetime"]
-            except Exception:
-                new_data_from = self._date_from
+            new_data_from = self._date_from
+            if self._incremental_update:
+                with contextlib.suppress(Exception):
+                    new_data_from = self.data["cost_monthly_sum"][-1]["datetime"]
 
             proc = BillingProcessor(
                 BillingInput(
