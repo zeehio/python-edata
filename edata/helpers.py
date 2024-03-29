@@ -113,7 +113,6 @@ class EdataHelper:
         """Synchronous update."""
         self._date_from = date_from
         self._date_to = date_to
-        self._incremental_update = incremental_update
 
         # update datadis resources
         self.update_datadis(self._cups, date_from, date_to)
@@ -125,7 +124,7 @@ class EdataHelper:
             except requests.exceptions.Timeout:
                 _LOGGER.error("Timeout exception while updating from REData")
 
-        self.process_data()
+        self.process_data(incremental_update=incremental_update)
 
         if self._must_dump:
             dump_storage(self._cups, self.data, self._storage_dir)
@@ -383,8 +382,11 @@ class EdataHelper:
 
         return True
 
-    def process_data(self):
+    def process_data(self, incremental_update: bool = True):
         """Process all raw data."""
+
+        self._incremental_update = incremental_update
+
         for process_method in [
             self.process_supplies,
             self.process_contracts,
