@@ -408,6 +408,9 @@ class EdataHelper:
                     else None
                 )
 
+        if not incremental_update:
+            dump_storage(self._cups, self.data, self._storage_dir)
+
     def process_supplies(self):
         """Process supplies data."""
         for i in self.data["supplies"]:
