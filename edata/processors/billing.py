@@ -92,19 +92,19 @@ class BillingProcessor(Processor):
 
         env = Environment()
         energy_expr = env.compile_expression(
-            f'({self._input["rules"]["energy_formula"]})|float|round(3)'
+            f'({self._input["rules"]["energy_formula"]})|float'
         )
         power_expr = env.compile_expression(
-            f'({self._input["rules"]["power_formula"]})|float|round(3)'
+            f'({self._input["rules"]["power_formula"]})|float'
         )
         others_expr = env.compile_expression(
-            f'({self._input["rules"]["others_formula"]})|float|round(3)'
+            f'({self._input["rules"]["others_formula"]})|float'
         )
         surplus_expr = env.compile_expression(
-            f'({self._input["rules"]["surplus_formula"]})|float|round(3)'
+            f'({self._input["rules"]["surplus_formula"]})|float'
         )
         main_expr = env.compile_expression(
-            f'({self._input["rules"]["main_formula"]})|float|round(3)'
+            f'({self._input["rules"]["main_formula"]})|float'
         )
 
         _data = sorted([_data[x] for x in _data], key=lambda x: x["datetime"])
@@ -136,10 +136,10 @@ class BillingProcessor(Processor):
             _surplus_term = 0
 
             with contextlib.suppress(Exception):
-                _energy_term = round(energy_expr(**x), 3)
-                _power_term = round(power_expr(**x), 3)
-                _others_term = round(others_expr(**x), 3)
-                _surplus_term = round(surplus_expr(**x), 3)
+                _energy_term = round(energy_expr(**x), 6)
+                _power_term = round(power_expr(**x), 6)
+                _others_term = round(others_expr(**x), 6)
+                _surplus_term = round(surplus_expr(**x), 6)
 
             new_item = PricingAggData(
                 datetime=x["datetime"],
@@ -208,8 +208,8 @@ class BillingProcessor(Processor):
 
         for item in self._output:
             for cost in self._output[item]:
-                cost["energy_term"] = round(cost["energy_term"], 3)
-                cost["power_term"] = round(cost["power_term"], 3)
-                cost["others_term"] = round(cost["others_term"], 3)
-                cost["surplus_term"] = round(cost["surplus_term"], 3)
-                cost["value_eur"] = round(main_expr(**cost, **self._input["rules"]), 3)
+                cost["value_eur"] = round(main_expr(**cost, **self._input["rules"]), 6)
+                cost["energy_term"] = round(cost["energy_term"], 6)
+                cost["power_term"] = round(cost["power_term"], 6)
+                cost["others_term"] = round(cost["others_term"], 6)
+                cost["surplus_term"] = round(cost["surplus_term"], 6)

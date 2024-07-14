@@ -53,6 +53,7 @@ class EdataHelper:
         self.attributes = {}
         self._storage_dir = storage_dir_path
         self._cups = cups
+        self._scups = cups[-5:0]
         self._authorized_nif = datadis_authorized_nif
         self.last_update = {x: datetime(1970, 1, 1) for x in self.data}
         self._date_from = datetime(1970, 1, 1)
@@ -111,6 +112,11 @@ class EdataHelper:
         incremental_update: bool = True,
     ):
         """Synchronous update."""
+
+        _LOGGER.info(
+            "%s: update triggered",
+            self._scups,
+        )
         self._date_from = date_from
         self._date_to = date_to
 
@@ -131,6 +137,8 @@ class EdataHelper:
 
     def update_supplies(self):
         """Synchronous data update of supplies."""
+
+        _LOGGER.info("%s: supplies update triggered", self._scups)
         if datetime.today().date() != self.last_update["supplies"].date():
             # if supplies haven't been updated today
             supplies = self.datadis_api.get_supplies(
@@ -140,10 +148,14 @@ class EdataHelper:
                 self.data["supplies"] = supplies
                 # if we got something, update last_update flag
                 self.last_update["supplies"] = datetime.now()
-                _LOGGER.info("Supplies data has been successfully updated")
+                _LOGGER.info("%s: supplies update succeeded", self._scups)
+        else:
+            _LOGGER.info("%s: supplies are already updated (skipping)", self._scups)
 
     def update_contracts(self, cups: str, distributor_code: str):
         """Synchronous data update of contracts."""
+
+        _LOGGER.info("%s: contracts update triggered", self._scups)
         if datetime.today().date() != self.last_update["contracts"].date():
             # if contracts haven't been updated today
             contracts = self.datadis_api.get_contract_detail(
@@ -155,7 +167,9 @@ class EdataHelper:
                 )  # extend contracts data with new ones
                 # if we got something, update last_update flag
                 self.last_update["contracts"] = datetime.now()
-                _LOGGER.info("Contracts data has been successfully updated")
+                _LOGGER.info("%s: contracts update succeeded", self._scups)
+        else:
+            _LOGGER.info("%s: contracts are already updated (skipping)", self._scups)
 
     def update_consumptions(
         self,
@@ -168,6 +182,7 @@ class EdataHelper:
     ):
         """Synchronous data update of consumptions."""
 
+        _LOGGER.info("%s: consumptions update triggered", self._scups)
         if (datetime.now() - self.last_update["consumptions"]) > self.UPDATE_INTERVAL:
             consumptions = self.datadis_api.get_consumption_data(
                 cups,
@@ -184,12 +199,17 @@ class EdataHelper:
                 )
                 self.last_update["consumptions"] = datetime.now()
                 _LOGGER.info(
-                    "Consumptions data has been successfully updated (%s elements)",
+                    "%s: consumptions update succeeded (%s new records)",
+                    self._scups,
                     len(consumptions),
                 )
+        else:
+            _LOGGER.info("%s: consumptions are already updated (skipping)", self._scups)
 
     def update_maximeter(self, cups, distributor_code, start_date, end_date):
         """Synchronous data update of maximeter."""
+
+        _LOGGER.info("%s: maximeter update triggered", self._scups)
         if (datetime.now() - self.last_update["maximeter"]) > self.UPDATE_INTERVAL:
             maximeter = self.datadis_api.get_max_power(
                 cups,
@@ -204,9 +224,12 @@ class EdataHelper:
                 )
                 self.last_update["maximeter"] = datetime.now()
                 _LOGGER.info(
-                    "Maximeter data has been successfully updated (%s elements)",
+                    "%s: maximeter update succeeded (%s new records)",
+                    self._scups,
                     len(maximeter),
                 )
+        else:
+            _LOGGER.info("%s: maximeter is already updated (skipping)", self._scups)
 
     def update_datadis(
         self,
@@ -215,9 +238,10 @@ class EdataHelper:
         date_to: datetime = datetime.today(),
     ):
         """Synchronous data update."""
+
         _LOGGER.info(
-            "Update requested for CUPS %s from %s to %s",
-            cups[-4:],
+            "%s: datadis update triggered (from %s to %s)",
+            self._scups,
             date_from.isoformat(),
             date_to.isoformat(),
         )
@@ -228,7 +252,8 @@ class EdataHelper:
         if len(self.data["supplies"]) == 0:
             # return if no supplies were discovered
             _LOGGER.warning(
-                "Supplies query failed or no supplies found in the provided account"
+                "%s: supplies update failed or no supplies found in the provided account",
+                self._scups,
             )
             return False
 
@@ -237,9 +262,7 @@ class EdataHelper:
         if supply is None:
             # return if specified cups seems not valid
             _LOGGER.error(
-                "CUPS %s not found in %s, wrong CUPS?",
-                cups[-4:],
-                [x["cups"] for x in self.data["supplies"]],
+                "%s: CUPS not found, please check configured CUPS", self._scups
             )
             return False
 
@@ -252,7 +275,8 @@ class EdataHelper:
         self.update_contracts(cups, distributor_code)
         if len(self.data["contracts"]) == 0:
             _LOGGER.warning(
-                "Contracts query failed or no contracts found in the provided account"
+                "%s: contracts update failed or no contracts found in the provided account",
+                self._scups,
             )
             return False
 
@@ -275,13 +299,15 @@ class EdataHelper:
         miss_cons, miss_maxim = sort_and_filter(date_from, date_to)
 
         _LOGGER.info(
-            "Identified missing consumptions: %s",
+            "%s: missing consumptions: %s",
+            self._scups,
             ", ".join(
                 [x["from"].isoformat() + " - " + x["to"].isoformat() for x in miss_cons]
             ),
         )
         _LOGGER.info(
-            "Identified missing maximeter: %s",
+            "%s, missing maximeter: %s",
+            self._scups,
             ", ".join(
                 [
                     x["from"].isoformat() + " - " + x["to"].isoformat()
@@ -335,7 +361,8 @@ class EdataHelper:
             [date_from, supply_date_start]
         ):
             _LOGGER.info(
-                "Supplies and contract start date do not match, exploring non-registered contracts"
+                "%s: supplies and contract start date do not match, exploring non-registered contracts",
+                self._scups,
             )
             start = max([supply_date_start, date_from])
             self.update_consumptions(
@@ -360,6 +387,11 @@ class EdataHelper:
         ),
     ):
         """Fetch PVPC prices using REData API."""
+
+        _LOGGER.info(
+            "%s: updating PVPC prices",
+            self._scups,
+        )
 
         self.data["pvpc"], missing = utils.extract_dt_ranges(
             self.data["pvpc"],
