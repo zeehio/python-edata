@@ -445,7 +445,7 @@ class EdataHelper:
                         for x in self.data["consumptions"]
                         if x["datetime"] >= new_data_from
                     ],
-                    "cycle_start_day": self.pricing_rules.get("cycle_start_day", 1),
+                    "cycle_start_day": 1,
                 }
             )
             today_starts = datetime(
