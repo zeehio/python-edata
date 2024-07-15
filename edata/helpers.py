@@ -53,7 +53,7 @@ class EdataHelper:
         self.attributes = {}
         self._storage_dir = storage_dir_path
         self._cups = cups
-        self._scups = cups[-5:0]
+        self._scups = cups[-5:]
         self._authorized_nif = datadis_authorized_nif
         self.last_update = {x: datetime(1970, 1, 1) for x in self.data}
         self._date_from = datetime(1970, 1, 1)
@@ -306,7 +306,7 @@ class EdataHelper:
             ),
         )
         _LOGGER.info(
-            "%s, missing maximeter: %s",
+            "%s: missing maximeter: %s",
             self._scups,
             ", ".join(
                 [
