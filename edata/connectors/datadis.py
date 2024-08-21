@@ -4,7 +4,6 @@ To fetch data from datadis.es private API.
 There a few issues that are workarounded:
  - You have to wait 24h between two identical requests.
  - Datadis server does not like ranges greater than 1 month.
- - TODO: gzip header checksum errors under weird circumstances
 """
 
 import contextlib
@@ -16,6 +15,8 @@ import os
 from dateutil.relativedelta import relativedelta
 
 import requests
+
+from filelock import FileLock
 
 from ..definitions import ConsumptionData, ContractData, MaxPowerData, SupplyData
 from ..processors import utils
@@ -104,50 +105,59 @@ class DatadisConnector:
             self._recent_queries_file = DEFAULT_RECENT_QUERIES_FILE
             self._recent_queries_cache_file = DEFAULT_RECENT_QUERIES_CACHE
         self._warned_queries = []
+        self._load_recent_cache()
 
-        # load caches (to avoid query spam if the program restarts)
+    def _load_recent_cache(self) -> None:
+        """Load caches."""
+
         with contextlib.suppress(FileNotFoundError):
             with open(self._recent_queries_file, encoding="utf8") as dst_file:
-                self._recent_queries = json.load(dst_file)
-                for query in self._recent_queries:
-                    self._recent_queries[query] = datetime.fromisoformat(
-                        self._recent_queries[query]
+                recent_queries = json.load(dst_file)
+                for query in recent_queries:
+                    recent_queries[query] = datetime.fromisoformat(
+                        recent_queries[query]
                     )
+                self._recent_queries.update(recent_queries)
+
             with open(self._recent_queries_cache_file, encoding="utf8") as dst_file:
-                self._recent_cache = json.load(dst_file)
+                self._recent_cache.update(json.load(dst_file))
 
     def _update_recent_queries(self, query: str, data: dict | None = None) -> None:
         """Cache a successful query to avoid exceeding query limits."""
 
-        # identify the query by a md5 hash
-        hash_query = hashlib.md5(query.encode()).hexdigest()
-        # prepare key (hash) and values (timestamp and response)
-        self._recent_queries[hash_query] = datetime.now()
-        if data is not None:
-            self._recent_cache[hash_query] = data
-
-        # purge old cache
-        to_delete = []
-        for _query in self._recent_queries:
-            if (datetime.now() - self._recent_queries[_query]) > QUERY_LIMIT:
-                to_delete.append(_query)
-
-        for key in to_delete:
-            with contextlib.suppress(KeyError):
-                self._recent_queries.pop(key, None)
-                self._recent_cache.pop(key, None)
-
-        # dump current cache to disk
-        try:
-            with open(self._recent_queries_file, "w", encoding="utf8") as dst_file:
-                json.dump(utils.serialize_dict(self._recent_queries), dst_file)
+        with FileLock(self._recent_queries_file + ".lock"):
+            self._load_recent_cache()
+            # identify the query by a md5 hash
+            hash_query = hashlib.md5(query.encode()).hexdigest()
+            # prepare key (hash) and values (timestamp and response)
+            self._recent_queries[hash_query] = datetime.now()
             if data is not None:
-                with open(
-                    self._recent_queries_cache_file, "w", encoding="utf8"
-                ) as dst_file:
-                    json.dump(self._recent_cache, dst_file)
-        except Exception as e:
-            _LOGGER.warning("Unknown error while updating cache: %s", e)
+                self._recent_cache[hash_query] = data
+
+            # purge old cache
+            to_delete = [
+                x
+                for x in self._recent_queries
+                if (datetime.now() - self._recent_queries[x]) > QUERY_LIMIT
+            ]
+
+            for key in to_delete:
+                with contextlib.suppress(KeyError):
+                    self._recent_queries.pop(key, None)
+                    self._recent_cache.pop(key, None)
+
+            # dump current cache to disk
+            try:
+                with open(self._recent_queries_file, "w", encoding="utf8") as dst_file:
+                    json.dump(utils.serialize_dict(self._recent_queries), dst_file)
+                if data is not None:
+                    with open(
+                        self._recent_queries_cache_file, "w", encoding="utf8"
+                    ) as dst_file:
+                        json.dump(self._recent_cache, dst_file)
+                _LOGGER.info("Local cache updated")
+            except Exception as e:
+                _LOGGER.warning("Unknown error while updating cache: %s", e)
 
     def _is_recent_query(self, query: str) -> bool:
         """Check if a query has been done recently to avoid exceeding query limits."""
@@ -160,7 +170,7 @@ class DatadisConnector:
     def _get_cache_for_query(self, query: str) -> dict:
         """Return cached response for a query."""
         hash_query = hashlib.md5(query.encode()).hexdigest()
-
+        _LOGGER.info("Serving '%s' from cache", query)
         return self._recent_cache.get(hash_query, None)
 
     def _get_token(self):
@@ -302,7 +312,7 @@ class DatadisConnector:
 
         # Request the resource
         response = self._get(
-            URL_GET_SUPPLIES, request_data=data, ignore_recent_queries=False
+            URL_GET_SUPPLIES, request_data=data, ignore_recent_queries=True
         )
 
         # Response is a list of serialized supplies.
@@ -318,23 +328,27 @@ class DatadisConnector:
                     SupplyData(
                         cups=i["cups"],  # the supply identifier
                         date_start=datetime.strptime(
-                            i["validDateFrom"]
-                            if i["validDateFrom"] != ""
-                            else "1970/01/01",
+                            (
+                                i["validDateFrom"]
+                                if i["validDateFrom"] != ""
+                                else "1970/01/01"
+                            ),
                             "%Y/%m/%d",
                         ),  # start date of the supply. 1970/01/01 if unset.
                         date_end=datetime.strptime(
-                            i["validDateTo"]
-                            if i["validDateTo"] != ""
-                            else tomorrow_str,
+                            (
+                                i["validDateTo"]
+                                if i["validDateTo"] != ""
+                                else tomorrow_str
+                            ),
                             "%Y/%m/%d",
                         ),  # end date of the supply, tomorrow if unset
                         # the following parameters are not crucial, so they can be none
-                        address=i["address"] if "address" in i else None,
-                        postal_code=i["postalCode"] if "postalCode" in i else None,
-                        province=i["province"] if "province" in i else None,
-                        municipality=i["municipality"] if "municipality" in i else None,
-                        distributor=i["distributor"] if "distributor" in i else None,
+                        address=i.get("address", None),
+                        postal_code=i.get("postalCode", None),
+                        province=i.get("province", None),
+                        municipality=i.get("municipality", None),
+                        distributor=i.get("distributor", None),
                         # these two are mandatory, we will use them to fetch contracts data
                         pointType=i["pointType"],
                         distributorCode=i["distributorCode"],
@@ -355,7 +369,7 @@ class DatadisConnector:
         if authorized_nif is not None:
             data["authorizedNif"] = authorized_nif
         response = self._get(
-            URL_GET_CONTRACT_DETAIL, request_data=data, ignore_recent_queries=False
+            URL_GET_CONTRACT_DETAIL, request_data=data, ignore_recent_queries=True
         )
         contracts = []
         tomorrow_str = (datetime.today() + timedelta(days=1)).strftime("%Y/%m/%d")
@@ -373,12 +387,16 @@ class DatadisConnector:
                         ),
                         marketer=i["marketer"],
                         distributorCode=distributor_code,
-                        power_p1=i["contractedPowerkW"][0]
-                        if isinstance(i["contractedPowerkW"], list)
-                        else None,
-                        power_p2=i["contractedPowerkW"][1]
-                        if (len(i["contractedPowerkW"]) > 1)
-                        else None,
+                        power_p1=(
+                            i["contractedPowerkW"][0]
+                            if isinstance(i["contractedPowerkW"], list)
+                            else None
+                        ),
+                        power_p2=(
+                            i["contractedPowerkW"][1]
+                            if (len(i["contractedPowerkW"]) > 1)
+                            else None
+                        ),
                     )
                 )
             else:

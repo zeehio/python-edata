@@ -74,9 +74,11 @@ class EdataHelper:
         self.datadis_api = DatadisConnector(
             datadis_username,
             datadis_password,
-            storage_path=os.path.join(storage_dir_path, const.PROG_NAME)
-            if storage_dir_path is not None
-            else None,
+            storage_path=(
+                os.path.join(storage_dir_path, const.PROG_NAME)
+                if storage_dir_path is not None
+                else None
+            ),
         )
         self.redata_api = REDataConnector()
 
@@ -679,11 +681,11 @@ class EdataHelper:
                         for x in self.data["consumptions"]
                         if x["datetime"] >= new_data_from
                     ],
-                    prices=[
-                        x for x in self.data["pvpc"] if x["datetime"] >= new_data_from
-                    ]
-                    if self.is_pvpc
-                    else None,
+                    prices=(
+                        [x for x in self.data["pvpc"] if x["datetime"] >= new_data_from]
+                        if self.is_pvpc
+                        else None
+                    ),
                     rules=self.pricing_rules,
                 )
             )
