@@ -71,9 +71,7 @@ DEFAULT_BILLING_SURPLUS_FORMULA = (
 
 # Sum energy and power terms, and substract surplus until 0.
 # An alternative would be "[(energy_term + power_term - surplus_term), 0]|max + others_term"
-DEFAULT_BILLING_MAIN_FORMULA = (
-    "[(energy_term - surplus_term), 0]|max + power_term + others_term"
-)
+DEFAULT_BILLING_MAIN_FORMULA = "energy_term + power_term + others_term"
 
 
 class SupplyData(TypedDict):

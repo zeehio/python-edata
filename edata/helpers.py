@@ -22,6 +22,12 @@ from .storage import check_storage_integrity, dump_storage, load_storage
 _LOGGER = logging.getLogger(__name__)
 
 
+def acups(cups):
+    """Print an abbreviated and anonymized CUPS."""
+
+    return cups[-5:]
+
+
 class EdataHelper:
     """Main EdataHelper class."""
 
@@ -53,7 +59,7 @@ class EdataHelper:
         self.attributes = {}
         self._storage_dir = storage_dir_path
         self._cups = cups
-        self._scups = cups[-5:]
+        self._scups = acups(cups)
         self._authorized_nif = datadis_authorized_nif
         self.last_update = {x: datetime(1970, 1, 1) for x in self.data}
         self._date_from = datetime(1970, 1, 1)
@@ -113,7 +119,7 @@ class EdataHelper:
         date_to: datetime = datetime.today(),
         incremental_update: bool = True,
     ):
-        """Synchronous update."""
+        """Update synchronously."""
 
         _LOGGER.info(
             "%s: update triggered",
@@ -138,9 +144,9 @@ class EdataHelper:
             dump_storage(self._cups, self.data, self._storage_dir)
 
     def update_supplies(self):
-        """Synchronous data update of supplies."""
+        """Update supplies."""
 
-        _LOGGER.info("%s: supplies update triggered", self._scups)
+        _LOGGER.debug("%s: supplies update triggered", self._scups)
         if datetime.today().date() != self.last_update["supplies"].date():
             # if supplies haven't been updated today
             supplies = self.datadis_api.get_supplies(
@@ -155,9 +161,9 @@ class EdataHelper:
             _LOGGER.info("%s: supplies are already updated (skipping)", self._scups)
 
     def update_contracts(self, cups: str, distributor_code: str):
-        """Synchronous data update of contracts."""
+        """Update contracts."""
 
-        _LOGGER.info("%s: contracts update triggered", self._scups)
+        _LOGGER.debug("%s: contracts update triggered", self._scups)
         if datetime.today().date() != self.last_update["contracts"].date():
             # if contracts haven't been updated today
             contracts = self.datadis_api.get_contract_detail(
@@ -182,9 +188,9 @@ class EdataHelper:
         measurement_type: str,
         point_type: int,
     ):
-        """Synchronous data update of consumptions."""
+        """Update consumptions."""
 
-        _LOGGER.info("%s: consumptions update triggered", self._scups)
+        _LOGGER.debug("%s: consumptions update triggered", self._scups)
         if (datetime.now() - self.last_update["consumptions"]) > self.UPDATE_INTERVAL:
             consumptions = self.datadis_api.get_consumption_data(
                 cups,
@@ -196,22 +202,23 @@ class EdataHelper:
                 authorized_nif=self._authorized_nif,
             )
             if len(consumptions) > 0:
+                _LOGGER.info(
+                    "%s: got consumptions from %s to %s",
+                    self._scups,
+                    consumptions[0]["datetime"].isoformat(),
+                    consumptions[-1]["datetime"].isoformat(),
+                )
                 self.data["consumptions"] = utils.extend_by_key(
                     self.data["consumptions"], consumptions, "datetime"
                 )
                 self.last_update["consumptions"] = datetime.now()
-                _LOGGER.info(
-                    "%s: consumptions update succeeded (%s new records)",
-                    self._scups,
-                    len(consumptions),
-                )
         else:
             _LOGGER.info("%s: consumptions are already updated (skipping)", self._scups)
 
     def update_maximeter(self, cups, distributor_code, start_date, end_date):
-        """Synchronous data update of maximeter."""
+        """Update maximeter."""
 
-        _LOGGER.info("%s: maximeter update triggered", self._scups)
+        _LOGGER.debug("%s: maximeter update triggered", self._scups)
         if (datetime.now() - self.last_update["maximeter"]) > self.UPDATE_INTERVAL:
             maximeter = self.datadis_api.get_max_power(
                 cups,
@@ -221,15 +228,14 @@ class EdataHelper:
                 authorized_nif=self._authorized_nif,
             )
             if len(maximeter) > 0:
+                _LOGGER.info(
+                    "%s: maximeter update succeeded",
+                    self._scups,
+                )
                 self.data["maximeter"] = utils.extend_by_key(
                     self.data["maximeter"], maximeter, "datetime"
                 )
                 self.last_update["maximeter"] = datetime.now()
-                _LOGGER.info(
-                    "%s: maximeter update succeeded (%s new records)",
-                    self._scups,
-                    len(maximeter),
-                )
         else:
             _LOGGER.info("%s: maximeter is already updated (skipping)", self._scups)
 
@@ -239,7 +245,7 @@ class EdataHelper:
         date_from: datetime = datetime(1970, 1, 1),
         date_to: datetime = datetime.today(),
     ):
-        """Synchronous data update."""
+        """Update all data from Datadis."""
 
         _LOGGER.info(
             "%s: datadis update triggered (from %s to %s)",
@@ -264,14 +270,21 @@ class EdataHelper:
         if supply is None:
             # return if specified cups seems not valid
             _LOGGER.error(
-                "%s: CUPS not found, please check configured CUPS", self._scups
+                "%s: CUPS not found. Got: %s",
+                self._scups,
+                [acups(x["cups"]) for x in self.data["supplies"]],
             )
             return False
+        _LOGGER.info("%s: CUPS found in account", self._scups)
 
         # get some supply-related data
         supply_date_start = supply["date_start"]
         distributor_code = supply["distributorCode"]
         point_type = supply["pointType"]
+
+        _LOGGER.info(
+            "%s: CUPS start date is %s", self._scups, supply_date_start.isoformat()
+        )
 
         # update contracts to get valid periods
         self.update_contracts(cups, distributor_code)
@@ -282,7 +295,7 @@ class EdataHelper:
             )
             return False
 
-        # filter consumptions and maximeter, and look for gaps
+        # filter consumptions and maximeter, and log gaps
         def sort_and_filter(dt_from, dt_to):
             self.data["consumptions"], miss_cons = utils.extract_dt_ranges(
                 self.data["consumptions"],
@@ -318,64 +331,47 @@ class EdataHelper:
             ),
         )
 
-        oldest_contract = datetime.today()
-        for contract in self.data["contracts"]:
-            # register oldest contract
-            if contract["date_start"] < oldest_contract:
-                oldest_contract = contract["date_start"]
-
-            # update consumptions
-            for gap in [
-                x
-                for x in miss_cons
-                if not (
-                    x["to"] < contract["date_start"] or x["from"] > contract["date_end"]
-                )
-            ]:
+        # update consumptions
+        for gap in miss_cons:
+            if not (
+                gap["to"] < supply["date_start"] or gap["from"] > supply["date_end"]
+            ):
                 # fetch consumptions for each consumptions gap in valid periods
+                start = max([gap["from"] + timedelta(hours=1), supply["date_start"]])
+                end = min([gap["to"], supply["date_end"]])
+                _LOGGER.info(
+                    "%s: request consumptions from %s to %s",
+                    self._scups,
+                    start.isoformat(),
+                    end.isoformat(),
+                )
                 self.update_consumptions(
                     cups,
                     distributor_code,
-                    max([gap["from"] + timedelta(hours=1), contract["date_start"]]),
-                    min([gap["to"], contract["date_end"]]),
+                    start,
+                    end,
                     "0",
                     point_type,
                 )
 
-            # update maximeter
-            for gap in [
-                x
-                for x in miss_maxim
-                if not (
-                    date_to < contract["date_start"] or date_from > contract["date_end"]
-                )
-            ]:
+        # update maximeter
+        for gap in miss_maxim:
+            if not (date_to < supply["date_start"] or date_from > supply["date_end"]):
                 # fetch maximeter for each maximeter gap in valid periods
                 start = max(
-                    [gap["from"], contract["date_start"] + relativedelta(months=1)]
+                    [gap["from"], supply["date_start"] + relativedelta(months=1)]
                 )
-                end = min([gap["to"], contract["date_end"]])
+                end = min([gap["to"], supply["date_end"]])
                 start = min([start, end])
+                _LOGGER.info(
+                    "%s: request maximeter from %s to %s",
+                    self._scups,
+                    start.isoformat(),
+                    end.isoformat(),
+                )
                 self.update_maximeter(cups, distributor_code, start, end)
 
-        # safe check periods in non-registered contracts
-        if oldest_contract != supply_date_start and oldest_contract > max(
-            [date_from, supply_date_start]
-        ):
-            _LOGGER.info(
-                "%s: supplies and contract start date do not match, exploring non-registered contracts",
-                self._scups,
-            )
-            start = max([supply_date_start, date_from])
-            self.update_consumptions(
-                cups, distributor_code, start, oldest_contract, "0", point_type
-            )
-            self.update_maximeter(cups, distributor_code, start, oldest_contract)
-            miss_cons, miss_maxim = sort_and_filter(start, date_to)
-        else:
-            miss_cons, miss_maxim = sort_and_filter(
-                max([date_from, oldest_contract]), date_to
-            )
+        miss_cons, miss_maxim = sort_and_filter(date_from, date_to)
 
         return True
 
