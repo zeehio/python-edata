@@ -7,16 +7,15 @@ There a few issues that are workarounded:
 """
 
 import contextlib
+from datetime import datetime, timedelta
 import hashlib
 import json
 import logging
-from datetime import datetime, timedelta
 import os
+
 from dateutil.relativedelta import relativedelta
-
-import requests
-
 from filelock import FileLock
+import requests
 
 from ..definitions import ConsumptionData, ContractData, MaxPowerData, SupplyData
 from ..processors import utils
@@ -155,7 +154,8 @@ class DatadisConnector:
                         self._recent_queries_cache_file, "w", encoding="utf8"
                     ) as dst_file:
                         json.dump(self._recent_cache, dst_file)
-                _LOGGER.info("Local cache updated")
+                _LOGGER.debug("Local cache updated")
+
             except Exception as e:
                 _LOGGER.warning("Unknown error while updating cache: %s", e)
 
@@ -253,13 +253,15 @@ class DatadisConnector:
                 _LOGGER.info("Got 200 OK at %s", url + params)
                 if reply.json():
                     response = reply.json()
-                    self._update_recent_queries(url + params, response)
+                    if not ignore_recent_queries:
+                        self._update_recent_queries(url + params, response)
                 else:
                     # this mostly happens when datadis provides an empty response
                     _LOGGER.info(
                         "Datadis returned an empty response at %s", url + params
                     )
-                    self._update_recent_queries(url + params)
+                    if not ignore_recent_queries:
+                        self._update_recent_queries(url + params)
             elif reply.status_code == 401 and not refresh_token:
                 # we're here if we were unauthorized so we will refresh the token
                 response = self._get(
@@ -276,7 +278,8 @@ class DatadisConnector:
                     reply.text,
                     url + params,
                 )
-                self._update_recent_queries(url + params)
+                if not ignore_recent_queries:
+                    self._update_recent_queries(url + params)
             elif is_retry:
                 # otherwise, if this was a retried request... warn the user
                 if (url + params) not in self._warned_queries:
@@ -288,7 +291,8 @@ class DatadisConnector:
                         "Query temporary disabled",
                         "Future 500 code errors for this query will be silenced until restart",
                     )
-                self._update_recent_queries(url + params)
+                if not ignore_recent_queries:
+                    self._update_recent_queries(url + params)
                 self._warned_queries.append(url + params)
             else:
                 # finally, retry since an unexpected error took place (mostly 500 errors - server fault)
