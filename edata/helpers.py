@@ -212,6 +212,8 @@ class EdataHelper:
                     self.data["consumptions"], consumptions, "datetime"
                 )
                 self.last_update["consumptions"] = datetime.now()
+            else:
+                _LOGGER.info("%s: consumptions are up to date", self._scups)
         else:
             _LOGGER.info("%s: consumptions are already updated (skipping)", self._scups)
 
@@ -236,6 +238,8 @@ class EdataHelper:
                     self.data["maximeter"], maximeter, "datetime"
                 )
                 self.last_update["maximeter"] = datetime.now()
+            else:
+                _LOGGER.info("%s: maximeter is up to date", self._scups)
         else:
             _LOGGER.info("%s: maximeter is already updated (skipping)", self._scups)
 

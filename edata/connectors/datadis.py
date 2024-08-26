@@ -75,8 +75,8 @@ def migrate_storage(storage_dir):
     """Migrate storage from older versions."""
 
     with contextlib.suppress(FileNotFoundError):
-        os.remove(storage_dir, "edata_recent_queries.json")
-        os.remove(storage_dir, "edata_recent_queries_cache.json")
+        os.remove(os.path.join(storage_dir, "edata_recent_queries.json"))
+        os.remove(os.path.join(storage_dir, "edata_recent_queries_cache.json"))
 
 
 class DatadisConnector:
