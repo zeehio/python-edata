@@ -8,13 +8,14 @@ There a few issues that are workarounded:
 
 import contextlib
 from datetime import datetime, timedelta
+import glob
 import hashlib
 import json
 import logging
 import os
+import tempfile
 
 from dateutil.relativedelta import relativedelta
-from filelock import FileLock
 import requests
 
 from ..definitions import ConsumptionData, ContractData, MaxPowerData, SupplyData
@@ -67,10 +68,15 @@ TIMEOUT = 3 * 60  # requests timeout
 QUERY_LIMIT = timedelta(hours=24)  # a datadis limitation, again...
 
 # Cache-related constants
-RECENT_QUERIES_FILENAME = "edata_recent_queries.json"
-RECENT_QUERIES_CACHE_FILENAME = "edata_recent_queries_cache.json"
-DEFAULT_RECENT_QUERIES_FILE = f"/tmp/{RECENT_QUERIES_FILENAME}"
-DEFAULT_RECENT_QUERIES_CACHE = f"/tmp/{RECENT_QUERIES_CACHE_FILENAME}"
+RECENT_CACHE_SUBDIR = "cache"
+
+
+def migrate_storage(storage_dir):
+    """Migrate storage from older versions."""
+
+    with contextlib.suppress(FileNotFoundError):
+        os.remove(storage_dir, "edata_recent_queries.json")
+        os.remove(storage_dir, "edata_recent_queries_cache.json")
 
 
 class DatadisConnector:
@@ -93,85 +99,69 @@ class DatadisConnector:
         self._smart_fetch = enable_smart_fetch
         self._recent_queries = {}
         self._recent_cache = {}
-        if storage_path is not None:
-            self._recent_queries_file = os.path.join(
-                storage_path, RECENT_QUERIES_FILENAME
-            )
-            self._recent_queries_cache_file = os.path.join(
-                storage_path, RECENT_QUERIES_CACHE_FILENAME
-            )
-        else:
-            self._recent_queries_file = DEFAULT_RECENT_QUERIES_FILE
-            self._recent_queries_cache_file = DEFAULT_RECENT_QUERIES_CACHE
         self._warned_queries = []
-        self._load_recent_cache()
+        if storage_path is not None:
+            self._recent_cache_dir = os.path.join(storage_path, RECENT_CACHE_SUBDIR)
+            migrate_storage(storage_path)
+        else:
+            self._recent_cache_dir = os.path.join(
+                tempfile.gettempdir(), RECENT_CACHE_SUBDIR
+            )
 
-    def _load_recent_cache(self) -> None:
-        """Load caches."""
-
-        with contextlib.suppress(FileNotFoundError):
-            with open(self._recent_queries_file, encoding="utf8") as dst_file:
-                recent_queries = json.load(dst_file)
-                for query in recent_queries:
-                    recent_queries[query] = datetime.fromisoformat(
-                        recent_queries[query]
-                    )
-                self._recent_queries.update(recent_queries)
-
-            with open(self._recent_queries_cache_file, encoding="utf8") as dst_file:
-                self._recent_cache.update(json.load(dst_file))
+        os.makedirs(self._recent_cache_dir, exist_ok=True)
 
     def _update_recent_queries(self, query: str, data: dict | None = None) -> None:
         """Cache a successful query to avoid exceeding query limits."""
 
-        with FileLock(self._recent_queries_file + ".lock"):
-            self._load_recent_cache()
-            # identify the query by a md5 hash
-            hash_query = hashlib.md5(query.encode()).hexdigest()
-            # prepare key (hash) and values (timestamp and response)
-            self._recent_queries[hash_query] = datetime.now()
-            if data is not None:
-                self._recent_cache[hash_query] = data
+        # identify the query by a md5 hash
+        hash_query = hashlib.md5(query.encode()).hexdigest()
 
-            # purge old cache
-            to_delete = [
-                x
-                for x in self._recent_queries
-                if (datetime.now() - self._recent_queries[x]) > QUERY_LIMIT
-            ]
+        # remove expired cache files
+        with contextlib.suppress(FileNotFoundError):
+            for cache_file in glob.glob(os.path.join(self._recent_cache_dir, "*")):
+                if (
+                    datetime.now()
+                    - datetime.fromtimestamp(os.path.getmtime(cache_file))
+                ) > QUERY_LIMIT:
+                    _LOGGER.info("Removing cache item '%s'", cache_file)
+                    os.remove(cache_file)
 
-            for key in to_delete:
-                with contextlib.suppress(KeyError):
-                    self._recent_queries.pop(key, None)
-                    self._recent_cache.pop(key, None)
+        # dump current cache to disk
+        try:
+            with open(
+                os.path.join(self._recent_cache_dir, hash_query),
+                "w",
+                encoding="utf8",
+            ) as dst_file:
+                json.dump(data, dst_file)
+                _LOGGER.info("Updating cache item '%s'", hash_query)
 
-            # dump current cache to disk
-            try:
-                with open(self._recent_queries_file, "w", encoding="utf8") as dst_file:
-                    json.dump(utils.serialize_dict(self._recent_queries), dst_file)
-                if data is not None:
-                    with open(
-                        self._recent_queries_cache_file, "w", encoding="utf8"
-                    ) as dst_file:
-                        json.dump(self._recent_cache, dst_file)
-                _LOGGER.debug("Local cache updated")
-
-            except Exception as e:
-                _LOGGER.warning("Unknown error while updating cache: %s", e)
+        except Exception as e:
+            _LOGGER.warning("Unknown error while updating cache: %s", e)
 
     def _is_recent_query(self, query: str) -> bool:
         """Check if a query has been done recently to avoid exceeding query limits."""
+
         hash_query = hashlib.md5(query.encode()).hexdigest()
+        cache_file = os.path.join(self._recent_cache_dir, hash_query)
 
-        if hash_query in self._recent_queries:
-            return (datetime.now() - self._recent_queries[hash_query]) < QUERY_LIMIT
-        return False
+        return (
+            os.path.exists(cache_file)
+            and (datetime.now() - datetime.fromtimestamp(os.path.getmtime(cache_file)))
+            < QUERY_LIMIT
+        )
 
-    def _get_cache_for_query(self, query: str) -> dict:
+    def _get_cache_for_query(self, query: str) -> dict | None:
         """Return cached response for a query."""
+
         hash_query = hashlib.md5(query.encode()).hexdigest()
-        _LOGGER.info("Serving '%s' from cache", query)
-        return self._recent_cache.get(hash_query, None)
+        cache_file = os.path.join(self._recent_cache_dir, hash_query)
+
+        try:
+            with open(cache_file, encoding="utf8") as cache:
+                return json.load(cache)
+        except FileNotFoundError:
+            return None
 
     def _get_token(self):
         """Private method that fetches a new token if needed."""
@@ -227,39 +217,50 @@ class DatadisConnector:
                 key = param
                 value = data[param]
                 params = params + f"{key}={value}&"
+            anonym_params = "?" if len(data) > 0 else ""
+
+            # build anonymized params for logging
+            for anonym_param in data:
+                key = anonym_param
+                if key == "cups":
+                    value = "xxxx" + data[anonym_param][-5:]
+                elif key == "authorizedNif":
+                    value = "xxxx"
+                else:
+                    value = data[anonym_param]
+                anonym_params = anonym_params + f"{key}={value}&"
 
             # check if query is already in cache
             if not ignore_recent_queries and self._is_recent_query(url + params):
                 _cache = self._get_cache_for_query(url + params)
                 if _cache is not None:
+                    _LOGGER.info("Returning cached data")
                     return _cache
                 return []
 
             # run the query
             try:
-                _LOGGER.debug("GET %s", url + params)
+                _LOGGER.info("GET %s", url + anonym_params)
                 reply = self._session.get(
                     url + params,
                     headers={"Accept-Encoding": "identity"},
                     timeout=TIMEOUT,
                 )
             except requests.exceptions.Timeout:
-                _LOGGER.warning("Timeout at %s", url + params)
+                _LOGGER.warning("Timeout at %s", url + anonym_params)
                 return []
 
             # eval response
             if reply.status_code == 200:
                 # we're here if reply seems valid
-                _LOGGER.info("Got 200 OK at %s", url + params)
+                _LOGGER.info("Got 200 OK")
                 if reply.json():
                     response = reply.json()
                     if not ignore_recent_queries:
                         self._update_recent_queries(url + params, response)
                 else:
                     # this mostly happens when datadis provides an empty response
-                    _LOGGER.info(
-                        "Datadis returned an empty response at %s", url + params
-                    )
+                    _LOGGER.info("Got an empty response")
                     if not ignore_recent_queries:
                         self._update_recent_queries(url + params)
             elif reply.status_code == 401 and not refresh_token:
@@ -273,10 +274,9 @@ class DatadisConnector:
             elif reply.status_code == 429:
                 # we're here if we exceeded datadis API rates (24h)
                 _LOGGER.warning(
-                    "%s %s at %s",
+                    "Got status code '%s' with message '%s'",
                     reply.status_code,
                     reply.text,
-                    url + params,
                 )
                 if not ignore_recent_queries:
                     self._update_recent_queries(url + params)
@@ -284,10 +284,9 @@ class DatadisConnector:
                 # otherwise, if this was a retried request... warn the user
                 if (url + params) not in self._warned_queries:
                     _LOGGER.warning(
-                        "%s %s at %s. %s. %s",
+                        "Got status code '%s' with message '%s'. %s. %s",
                         reply.status_code,
                         reply.text,
-                        url + params,
                         "Query temporary disabled",
                         "Future 500 code errors for this query will be silenced until restart",
                     )

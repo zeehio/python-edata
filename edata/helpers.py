@@ -285,6 +285,9 @@ class EdataHelper:
         _LOGGER.info(
             "%s: CUPS start date is %s", self._scups, supply_date_start.isoformat()
         )
+        _LOGGER.info(
+            "%s: CUPS end date is %s", self._scups, supply["date_end"].isoformat()
+        )
 
         # update contracts to get valid periods
         self.update_contracts(cups, distributor_code)
@@ -293,7 +296,7 @@ class EdataHelper:
                 "%s: contracts update failed or no contracts found in the provided account",
                 self._scups,
             )
-            return False
+            # return False
 
         # filter consumptions and maximeter, and log gaps
         def sort_and_filter(dt_from, dt_to):
@@ -313,25 +316,20 @@ class EdataHelper:
 
         miss_cons, miss_maxim = sort_and_filter(date_from, date_to)
 
+        # update consumptions
         _LOGGER.info(
             "%s: missing consumptions: %s",
             self._scups,
             ", ".join(
-                [x["from"].isoformat() + " - " + x["to"].isoformat() for x in miss_cons]
-            ),
-        )
-        _LOGGER.info(
-            "%s: missing maximeter: %s",
-            self._scups,
-            ", ".join(
                 [
-                    x["from"].isoformat() + " - " + x["to"].isoformat()
-                    for x in miss_maxim
+                    "from "
+                    + (x["from"] + timedelta(hours=1)).isoformat()
+                    + " to "
+                    + x["to"].isoformat()
+                    for x in miss_cons
                 ]
             ),
         )
-
-        # update consumptions
         for gap in miss_cons:
             if not (
                 gap["to"] < supply["date_start"] or gap["from"] > supply["date_end"]
@@ -340,7 +338,7 @@ class EdataHelper:
                 start = max([gap["from"] + timedelta(hours=1), supply["date_start"]])
                 end = min([gap["to"], supply["date_end"]])
                 _LOGGER.info(
-                    "%s: request consumptions from %s to %s",
+                    "%s: requesting consumptions from %s to %s",
                     self._scups,
                     start.isoformat(),
                     end.isoformat(),
@@ -355,6 +353,16 @@ class EdataHelper:
                 )
 
         # update maximeter
+        _LOGGER.info(
+            "%s: missing maximeter: %s",
+            self._scups,
+            ", ".join(
+                [
+                    "from " + x["from"].isoformat() + " to " + x["to"].isoformat()
+                    for x in miss_maxim
+                ]
+            ),
+        )
         for gap in miss_maxim:
             if not (date_to < supply["date_start"] or date_from > supply["date_end"]):
                 # fetch maximeter for each maximeter gap in valid periods
@@ -364,7 +372,7 @@ class EdataHelper:
                 end = min([gap["to"], supply["date_end"]])
                 start = min([start, end])
                 _LOGGER.info(
-                    "%s: request maximeter from %s to %s",
+                    "%s: requesting maximeter from %s to %s",
                     self._scups,
                     start.isoformat(),
                     end.isoformat(),
