@@ -3,7 +3,7 @@
 import datetime as dt
 import logging
 
-import requests
+import httpx
 from dateutil import parser
 
 from ..definitions import PricingData
@@ -38,7 +38,7 @@ class REDataConnector:
             end=dt_to,
         )
         data = []
-        res = requests.get(url, timeout=REQUESTS_TIMEOUT)
+        res = httpx.get(url, timeout=REQUESTS_TIMEOUT)
         if res.status_code == 200 and res.json():
             res_json = res.json()
             try:

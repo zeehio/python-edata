@@ -7,7 +7,7 @@ import logging
 import os
 
 from dateutil.relativedelta import relativedelta
-import requests
+import httpx
 
 from . import const
 from .connectors.datadis import DatadisConnector
@@ -135,7 +135,7 @@ class EdataHelper:
         if self.is_pvpc:
             try:
                 self.update_redata(date_from, date_to)
-            except requests.exceptions.Timeout:
+            except httpx.TimeoutException:
                 _LOGGER.error("Timeout exception while updating from REData")
 
         self.process_data(incremental_update=incremental_update)

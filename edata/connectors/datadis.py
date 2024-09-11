@@ -16,7 +16,7 @@ import os
 import tempfile
 
 from dateutil.relativedelta import relativedelta
-import requests
+import httpx
 
 from ..definitions import ConsumptionData, ContractData, MaxPowerData, SupplyData
 from ..processors import utils
@@ -94,7 +94,7 @@ class DatadisConnector:
         # initialize some things
         self._usr = username
         self._pwd = password
-        self._session = requests.Session()
+        self._client = httpx.Client()
         self._token = {}
         self._smart_fetch = enable_smart_fetch
         self._recent_queries = {}
@@ -168,8 +168,8 @@ class DatadisConnector:
 
         _LOGGER.info("No token found, fetching a new one")
         is_valid_token = False
-        self._session = requests.Session()
-        response = self._session.post(
+        self._client = httpx.Client()
+        response = self._client.post(
             URL_TOKEN,
             data={
                 TOKEN_USERNAME: self._usr.encode("utf-8"),
@@ -179,8 +179,8 @@ class DatadisConnector:
         if response.status_code == 200:
             # store token encoded
             self._token["encoded"] = response.text
-            # prepare session authorization bearer
-            self._session.headers["Authorization"] = "Bearer " + self._token["encoded"]
+            # prepare client authorization bearer
+            self._client.headers["Authorization"] = "Bearer " + self._token["encoded"]
             is_valid_token = True
         else:
             _LOGGER.error("Unknown error while retrieving token, got %s", response.text)
@@ -243,12 +243,12 @@ class DatadisConnector:
             # run the query
             try:
                 _LOGGER.info("GET %s", url + anonym_params)
-                reply = self._session.get(
+                reply = self._client.get(
                     url + params,
                     headers={"Accept-Encoding": "identity"},
                     timeout=TIMEOUT,
                 )
-            except requests.exceptions.Timeout:
+            except httpx.TimeoutException:
                 _LOGGER.warning("Timeout at %s", url + anonym_params)
                 return []
 
