@@ -25,8 +25,10 @@ class REDataConnector:
 
     def __init__(
         self,
+        httpx_async_client=None
     ) -> None:
         """Init method for REDataConnector"""
+        self._client = httpx_async_client
 
     def _process_response(self, res, url) -> list[PricingData]:
         if res.status_code != 200 or not res.json():
@@ -55,6 +57,22 @@ class REDataConnector:
             )
             for element in res_list
         ]
+
+    async def async_get_realtime_prices(
+        self, dt_from: dt.datetime, dt_to: dt.datetime, is_ceuta_melilla: bool = False
+    ) -> list[PricingData]:
+        """GET query to fetch realtime pvpc prices, historical data is limited to current month"""
+        url = URL_REALTIME_PRICES.format(
+            geo_id=8744 if is_ceuta_melilla else 8741,
+            start=dt_from,
+            end=dt_to,
+        )
+        if self._client is not None:
+            res = await self._client.get(url, timeout=REQUESTS_TIMEOUT)
+        else:
+            async with httpx.AsyncClient() as client:
+                res = await client.get(url, timeout=REQUESTS_TIMEOUT)
+        return self._process_response(res, url)
 
     def get_realtime_prices(
         self, dt_from: dt.datetime, dt_to: dt.datetime, is_ceuta_melilla: bool = False
