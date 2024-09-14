@@ -81,18 +81,10 @@ def migrate_storage(storage_dir):
         os.remove(os.path.join(storage_dir, "edata_recent_queries_cache.json"))
 
 
-async def _async_migrate_storage(storage_dir):
-    """Migrate storage from older versions."""
-
-    with contextlib.suppress(FileNotFoundError):
-        await aiofiles.os.remove(os.path.join(storage_dir, "edata_recent_queries.json"))
-        await aiofiles.os.remove(os.path.join(storage_dir, "edata_recent_queries_cache.json"))
-
-
 class AsyncDatadisConnector:
     """A Datadis private API connector."""
 
-    async def __init__(
+    def __init__(
         self,
         username: str,
         password: str,
@@ -112,13 +104,13 @@ class AsyncDatadisConnector:
         self._warned_queries = []
         if storage_path is not None:
             self._recent_cache_dir = os.path.join(storage_path, RECENT_CACHE_SUBDIR)
-            await _async_migrate_storage(storage_path)
+            migrate_storage(storage_path)
         else:
             self._recent_cache_dir = os.path.join(
                 tempfile.gettempdir(), RECENT_CACHE_SUBDIR
             )
 
-        await aiofiles.os.makedirs(self._recent_cache_dir, exist_ok=True)
+        os.makedirs(self._recent_cache_dir, exist_ok=True)
 
     async def __aenter__(self):
         return self

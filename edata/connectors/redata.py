@@ -43,7 +43,7 @@ def _pricing_data_from_json(url, res) -> list[PricingData]:
 class AsyncREDataConnector:
     """Main class for REData connector"""
 
-    def __init__(
+    async def __init__(
         self,
     ) -> None:
         """Init method for REDataConnector"""

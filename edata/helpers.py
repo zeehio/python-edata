@@ -10,14 +10,14 @@ from dateutil.relativedelta import relativedelta
 import httpx
 
 from . import const
-from .connectors.datadis import DatadisConnector
-from .connectors.redata import REDataConnector
+from .connectors.datadis import AsyncDatadisConnector, DatadisConnector
+from .connectors.redata import AsyncREDataConnector, REDataConnector
 from .definitions import ATTRIBUTES, EdataData, PricingRules
 from .processors import utils
 from .processors.billing import BillingInput, BillingProcessor
 from .processors.consumption import ConsumptionProcessor
 from .processors.maximeter import MaximeterProcessor
-from .storage import check_storage_integrity, dump_storage, load_storage
+from .storage import check_storage_integrity, dump_storage, load_storage, async_load_storage, async_dump_storage
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -28,20 +28,16 @@ def acups(cups):
     return cups[-5:]
 
 
-class EdataHelper:
+class _EdataHelperBase:
     """Main EdataHelper class."""
 
     UPDATE_INTERVAL = timedelta(hours=1)
 
     def __init__(
         self,
-        datadis_username: str,
-        datadis_password: str,
         cups: str,
         datadis_authorized_nif: str | None = None,
         pricing_rules: PricingRules | None = None,
-        storage_dir_path: str | None = None,
-        data: EdataData | None = None,
     ) -> None:
         self.data = EdataData(
             supplies=[],
@@ -67,27 +63,9 @@ class EdataHelper:
         self._must_dump = True
         self._incremental_update = True
 
-        if data is not None:
-            data = check_storage_integrity(data)
-            self.data = data
-        else:
-            with contextlib.suppress(Exception):
-                self.data = load_storage(self._cups, self._storage_dir)
-
         for attr in ATTRIBUTES:
             self.attributes[attr] = None
-
-        self.datadis_api = DatadisConnector(
-            datadis_username,
-            datadis_password,
-            storage_path=(
-                os.path.join(storage_dir_path, const.PROG_NAME)
-                if storage_dir_path is not None
-                else None
-            ),
-        )
-        self.redata_api = REDataConnector()
-
+  
         self.pricing_rules = pricing_rules
 
         if self.pricing_rules is not None:
@@ -101,7 +79,8 @@ class EdataHelper:
                 self.is_pvpc = False
         else:
             self.enable_billing = False
-            self.is_pvpc = False
+            self.is_pvpc = False 
+
 
     async def async_update(
         self,
@@ -767,3 +746,89 @@ class EdataHelper:
             self.attributes[attr] = None
 
         self.last_update = {x: datetime(1970, 1, 1) for x in self.data}
+
+
+class AsyncEdataHelper(_EdataHelperBase):
+    async def __init__(
+
+        self,
+
+        datadis_username: str,
+        datadis_password: str,
+        cups: str,
+        datadis_authorized_nif: str | None = None,
+        pricing_rules: PricingRules | None = None,
+        storage_dir_path: str | None = None,
+        data: EdataData | None = None,
+    ) -> None:
+    async def __init__(
+
+        self,
+
+        datadis_username: str,
+        datadis_password: str,
+        cups: str,
+        datadis_authorized_nif: str | None = None,
+        pricing_rules: PricingRules | None = None,
+        storage_dir_path: str | None = None,
+        data: EdataData | None = None,
+    ) -> None:
+        super().__init__(
+            cups=cups,
+            datadis_authorized_nif=datadis_authorized_nif,
+            pricing_rules=pricing_rules,
+        )
+        if data is not None:
+            data = check_storage_integrity(data)
+            self.data = data
+        else:
+            with contextlib.suppress(Exception):
+                self.data = await async_load_storage(self._cups, self._storage_dir)
+
+        self.datadis_api = await AsyncDatadisConnector(
+            datadis_username,
+            datadis_password,
+            storage_path=(
+                os.path.join(storage_dir_path, const.PROG_NAME)
+                if storage_dir_path is not None
+                else None
+            ),
+        )
+        self.redata_api = await AsyncREDataConnector()
+
+
+
+class EdataHelper(_EdataHelperBase):
+    def __init__(
+        self,
+        datadis_username: str,
+        datadis_password: str,
+        cups: str,
+        datadis_authorized_nif: str | None = None,
+        pricing_rules: PricingRules | None = None,
+        storage_dir_path: str | None = None,
+        data: EdataData | None = None,
+    ) -> None:
+        super().__init__(
+            cups=cups,
+            datadis_authorized_nif=datadis_authorized_nif,
+            pricing_rules=pricing_rules,
+        )
+
+        if data is not None:
+            data = check_storage_integrity(data)
+            self.data = data
+        else:
+            with contextlib.suppress(Exception):
+                self.data = load_storage(self._cups, self._storage_dir)
+
+        self.datadis_api = DatadisConnector(
+            datadis_username,
+            datadis_password,
+            storage_path=(
+                os.path.join(storage_dir_path, const.PROG_NAME)
+                if storage_dir_path is not None
+                else None
+            ),
+        )
+        self.redata_api = REDataConnector()
