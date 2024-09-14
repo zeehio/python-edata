@@ -28,43 +28,42 @@ class REDataConnector:
     ) -> None:
         """Init method for REDataConnector"""
 
-    def get_realtime_prices(
-        self, dt_from: dt.datetime, dt_to: dt.datetime, is_ceuta_melilla: bool = False
-    ) -> list:
-        """GET query to fetch realtime pvpc prices, historical data is limited to current month"""
-        url = URL_REALTIME_PRICES.format(
-            geo_id=8744 if is_ceuta_melilla else 8741,
-            start=dt_from,
-            end=dt_to,
-        )
-        data = []
-        res = httpx.get(url, timeout=REQUESTS_TIMEOUT)
-        if res.status_code == 200 and res.json():
-            res_json = res.json()
-            try:
-                res_list = res_json["included"][0]["attributes"]["values"]
-            except IndexError:
-                _LOGGER.error(
-                    "%s returned a malformed response: %s ",
-                    url,
-                    res.text,
-                )
-                return data
-
-            for element in res_list:
-                data.append(
-                    PricingData(
-                        datetime=parser.parse(element["datetime"]).replace(tzinfo=None),
-                        value_eur_kWh=element["value"] / 1000,
-                        delta_h=1,
-                    )
-                )
-        else:
+    def _process_response(self, res, url) -> list[PricingData]:
+        if res.status_code != 200 or not res.json():
             _LOGGER.error(
                 "%s returned %s with code %s",
                 url,
                 res.text,
                 res.status_code,
             )
+            return []
+        res_json = res.json()
+        try:
+            res_list = res_json["included"][0]["attributes"]["values"]
+        except IndexError:
+            _LOGGER.error(
+                "%s returned a malformed response: %s ",
+                url,
+                res.text,
+            )
+            return []
+        return [
+            PricingData(
+                datetime=parser.parse(element["datetime"]).replace(tzinfo=None),
+                value_eur_kWh=element["value"] / 1000,
+                delta_h=1,
+            )
+            for element in res_list
+        ]
 
-        return data
+    def get_realtime_prices(
+        self, dt_from: dt.datetime, dt_to: dt.datetime, is_ceuta_melilla: bool = False
+    ) -> list[PricingData]:
+        """GET query to fetch realtime pvpc prices, historical data is limited to current month"""
+        url = URL_REALTIME_PRICES.format(
+            geo_id=8744 if is_ceuta_melilla else 8741,
+            start=dt_from,
+            end=dt_to,
+        )
+        res = httpx.get(url, timeout=REQUESTS_TIMEOUT)
+        return self._process_response(res, url)
