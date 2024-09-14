@@ -22,6 +22,14 @@ from .storage import check_storage_integrity, dump_storage, load_storage
 _LOGGER = logging.getLogger(__name__)
 
 
+def _call_async(coro):
+    try:
+        loop = asyncio.get_event_loop()
+    except RuntimeError:
+        return asyncio.run(coro)
+    else:
+        return loop.run_until_complete(coro)
+
 def acups(cups):
     """Print an abbreviated and anonymized CUPS."""
 
@@ -109,9 +117,43 @@ class EdataHelper:
         date_to: datetime = datetime.today(),
     ):
         """Async call of update method."""
-        asyncio.get_event_loop().run_in_executor(
-            None, self.update, *[date_from, date_to]
+        _LOGGER.info(
+            "%s: update triggered",
+            self._scups,
         )
+        loop = asyncio.get_running_loop()
+        self._date_from = date_from
+        self._date_to = date_to
+
+        # update datadis resources
+        # TODO: async_update_datadis
+        await loop.run_in_executor(
+            None,
+            self.update_datadis,
+            self._cups,
+            date_from,
+            date_to,
+        )
+
+        # update redata resources if pvpc is requested
+        if self.is_pvpc:
+            try:
+                await self._async_update_redata(date_from, date_to)
+            except httpx.TimeoutException:
+                _LOGGER.error("Timeout exception while updating from REData")
+
+        self.process_data(incremental_update=incremental_update)
+
+        if self._must_dump:
+            # TODO; async_dump_storage
+            await loop.run_in_executor(
+                None,
+                dump_storage,
+                self._cups,
+                self.data,
+                self._storage_dir,
+            )
+
 
     def update(
         self,
@@ -120,28 +162,13 @@ class EdataHelper:
         incremental_update: bool = True,
     ):
         """Update synchronously."""
-
-        _LOGGER.info(
-            "%s: update triggered",
-            self._scups,
+        return _call_async(
+            self.async_update(
+                date_from,
+                date_to,
+                incremental_update
+            )
         )
-        self._date_from = date_from
-        self._date_to = date_to
-
-        # update datadis resources
-        self.update_datadis(self._cups, date_from, date_to)
-
-        # update redata resources if pvpc is requested
-        if self.is_pvpc:
-            try:
-                self.update_redata(date_from, date_to)
-            except httpx.TimeoutException:
-                _LOGGER.error("Timeout exception while updating from REData")
-
-        self.process_data(incremental_update=incremental_update)
-
-        if self._must_dump:
-            dump_storage(self._cups, self.data, self._storage_dir)
 
     def update_supplies(self):
         """Update supplies."""
@@ -387,7 +414,7 @@ class EdataHelper:
 
         return True
 
-    def update_redata(
+    async def _async_update_redata(
         self,
         date_from: datetime = (datetime.today() - timedelta(days=30)).replace(
             hour=0, minute=0
@@ -397,9 +424,10 @@ class EdataHelper:
         ),
     ):
         """Fetch PVPC prices using REData API."""
-
         _LOGGER.info(
+
             "%s: updating PVPC prices",
+
             self._scups,
         )
 
@@ -416,13 +444,25 @@ class EdataHelper:
                 gap["from"],
             )
             while len(prices) == 0 and gap["from"] < gap["to"]:
-                prices = self.redata_api.get_realtime_prices(gap["from"], gap["to"])
+                prices = await self.redata_api.async_get_realtime_prices(gap["from"], gap["to"])
                 gap["from"] = gap["from"] + timedelta(days=1)
             self.data["pvpc"] = utils.extend_by_key(
                 self.data["pvpc"], prices, "datetime"
             )
-
         return True
+
+    def update_redata(
+        self,
+        date_from: datetime = (datetime.today() - timedelta(days=30)).replace(
+            hour=0, minute=0
+        ),
+        date_to: datetime = (datetime.today() + timedelta(days=2)).replace(
+            hour=0, minute=0
+        ),
+    ):
+        """Fetch PVPC prices using REData API."""
+        return _call_async(self._async_update_redata(date_from, date_to))
+
 
     def process_data(self, incremental_update: bool = True):
         """Process all raw data."""
